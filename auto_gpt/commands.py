@@ -1,121 +1,244 @@
-import os
-import sys
-import importlib
-import inspect
-from typing import Callable, Any, List
+from auto_gpt import browse
+import json
+import datetime
+from auto_gpt import agent_manager as agents
+from auto_gpt import speak
+from auto_gpt.config import Config
+from auto_gpt.json_parser import fix_and_parse_json
+from duckduckgo_search import ddg
 
-# Unique identifier for auto-gpt commands
-AUTO_GPT_COMMAND_IDENTIFIER = "auto_gpt_command"
+from ix.commands import CommandRegistry, command
 
-class Command:
-    """A class representing a command.
+cfg = Config()
 
-    Attributes:
-        name (str): The name of the command.
-        description (str): A brief description of what the command does.
-        signature (str): The signature of the function that the command executes. Defaults to None.
-    """
 
-    def __init__(self, name: str, description: str, method: Callable[..., Any], signature: str = None):
-        self.name = name
-        self.description = description
-        self.method = method
-        self.signature = signature if signature else str(inspect.signature(self.method))
+def is_valid_int(value):
+    try:
+        int(value)
+        return True
+    except ValueError:
+        return False
 
-    def __call__(self, *args, **kwargs) -> Any:
-        return self.method(*args, **kwargs)
+def parse_command(response):
+    try:
+        response_json = fix_and_parse_json(response)
+        
+        if "command" not in response_json:
+            return "Error:" , "Missing 'command' object in JSON"
+        
+        command = response_json["command"]
 
-    def __str__(self) -> str:
-        return f"{self.name}: {self.description}, args: {self.signature}"
+        if "name" not in command:
+            return "Error:", "Missing 'name' field in 'command' object"
+        
+        command_name = command["name"]
 
-class CommandRegistry:
-    """
-    The CommandRegistry class is a manager for a collection of Command objects.
-    It allows the registration, modification, and retrieval of Command objects,
-    as well as the scanning and loading of command plugins from a specified
-    directory.
-    """
+        # Use an empty dictionary if 'args' field is not present in 'command' object
+        arguments = command.get("args", {})
 
-    def __init__(self):
-        self.commands = {}
+        if not arguments:
+            arguments = {}
 
-    def _import_module(self, module_name: str) -> Any:
-        return importlib.import_module(module_name)
+        return command_name, arguments
+    except json.decoder.JSONDecodeError:
+        return "Error:", "Invalid JSON"
+    # All other errors, return "Error: + error message"
+    except Exception as e:
+        return "Error:", str(e)
 
-    def _reload_module(self, module: Any) -> Any:
-        return importlib.reload(module)
+def execute_command(command_registry: CommandRegistry, command_name: str, arguments: dict) -> str:
+    try:
+        # Look up the command in the registry
+        cmd = command_registry.commands.get(command_name)
 
-    def register(self, cmd: Command) -> None:
-        self.commands[cmd.name] = cmd
-
-    def unregister(self, command_name: str):
-        if command_name in self.commands:
-            del self.commands[command_name]
+        # If the command is found, call it with the provided arguments
+        if cmd:
+            return cmd(**arguments)
+        # special case google until this can be moved down into the function.
+        if command_name == "google":
+            # Check if the Google API key is set and use the official search method
+            # If the API key is not set or has only whitespaces, use the unofficial search method
+            if cfg.google_api_key and (cfg.google_api_key.strip() if cfg.google_api_key else None):
+                return google_official_search(arguments["input"])
+            else:
+                return google_search(arguments["input"])
+        elif command_name == "task_complete":
+            shutdown()
         else:
-            raise KeyError(f"Command '{command_name}' not found in registry.")
+            return f"Unknown command {command_name}"
 
-    def reload_commands(self) -> None:
-        """Reloads all loaded command plugins."""
-        for cmd_name in self.commands:
-            cmd = self.commands[cmd_name]
-            module = self._import_module(cmd.__module__)
-            reloaded_module = self._reload_module(module)
-            if hasattr(reloaded_module, "register"):
-                reloaded_module.register(self)
+    except Exception as e:
+        return "Error: " + str(e)
 
-    def get_command(self, name: str) -> Callable[..., Any]:
-        return self.commands[name]
 
-    def call(self, command_name: str, **kwargs) -> Any:
-        if command_name not in self.commands:
-            raise KeyError(f"Command '{command_name}' not found in registry.")
-        command = self.commands[command_name]
-        return command(**kwargs)
+def get_datetime():
+    return "Current date and time: " + \
+        datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    def command_prompt(self) -> str:
-        """
-        Returns a string representation of all registered `Command` objects for use in a prompt
-        """
-        commands_list = [f"{idx + 1}. {str(cmd)}" for idx, cmd in enumerate(self.commands.values())]
-        return "\n".join(commands_list)
 
-    def import_commands(self, module_name: str) -> None:
-        """
-        Imports the specified Python module containing command plugins.
+def google_search(query, num_results=8):
+    search_results = []
+    for j in ddg(query, max_results=num_results):
+        search_results.append(j)
 
-        This method imports the associated module and registers any functions or
-        classes that are decorated with the `AUTO_GPT_COMMAND_IDENTIFIER` attribute
-        as `Command` objects. The registered `Command` objects are then added to the
-        `commands` dictionary of the `CommandRegistry` object.
+    return json.dumps(search_results, ensure_ascii=False, indent=4)
 
-        Args:
-            module_name (str): The name of the module to import for command plugins.
-        """
+def google_official_search(query, num_results=8):
+    from googleapiclient.discovery import build
+    from googleapiclient.errors import HttpError
+    import json
 
-        module = importlib.import_module(module_name)
+    try:
+        # Get the Google API key and Custom Search Engine ID from the config file
+        api_key = cfg.google_api_key
+        custom_search_engine_id = cfg.custom_search_engine_id
 
-        for attr_name in dir(module):
-            attr = getattr(module, attr_name)
-            # Register decorated functions
-            if hasattr(attr, AUTO_GPT_COMMAND_IDENTIFIER) and getattr(attr, AUTO_GPT_COMMAND_IDENTIFIER):
-                self.register(attr.command)
-            # Register command classes
-            elif inspect.isclass(attr) and issubclass(attr, Command) and attr != Command:
-                cmd_instance = attr()
-                self.register(cmd_instance)
+        # Initialize the Custom Search API service
+        service = build("customsearch", "v1", developerKey=api_key)
+        
+        # Send the search query and retrieve the results
+        result = service.cse().list(q=query, cx=custom_search_engine_id, num=num_results).execute()
 
-def command(name: str, description: str, signature: str = None) -> Callable[..., Any]:
-    """The command decorator is used to create Command objects from ordinary functions."""
-    def decorator(func: Callable[..., Any]) -> Command:
-        cmd = Command(name=name, description=description, method=func, signature=signature)
+        # Extract the search result items from the response
+        search_results = result.get("items", [])
+        
+        # Create a list of only the URLs from the search results
+        search_results_links = [item["link"] for item in search_results]
 
-        def wrapper(*args, **kwargs) -> Any:
-            return func(*args, **kwargs)
+    except HttpError as e:
+        # Handle errors in the API call
+        error_details = json.loads(e.content.decode())
+        
+        # Check if the error is related to an invalid or missing API key
+        if error_details.get("error", {}).get("code") == 403 and "invalid API key" in error_details.get("error", {}).get("message", ""):
+            return "Error: The provided Google API key is invalid or missing."
+        else:
+            return f"Error: {e}"
 
-        wrapper.command = cmd
+    # Return the list of search result URLs
+    return search_results_links
 
-        setattr(wrapper, AUTO_GPT_COMMAND_IDENTIFIER, True)
-        return wrapper
+@command("browse_website", "Browse Website", '"url": "<url>", "question": "<what_you_want_to_find_on_website>"')
+def browse_website(url, question):
+    summary = get_text_summary(url, question)
+    links = get_hyperlinks(url)
 
-    return decorator
+    # Limit links to 5
+    if len(links) > 5:
+        links = links[:5]
 
+    result = f"""Website Content Summary: {summary}\n\nLinks: {links}"""
+
+    return result
+
+
+def get_text_summary(url, question):
+    text = browse.scrape_text(url)
+    summary = browse.summarize_text(text, question)
+    return """ "Result" : """ + summary
+
+
+def get_hyperlinks(url):
+    link_list = browse.scrape_links(url)
+    return link_list
+
+
+def commit_memory(string):
+    _text = f"""Committing memory with string "{string}" """
+    mem.permanent_memory.append(string)
+    return _text
+
+
+def delete_memory(key):
+    if key >= 0 and key < len(mem.permanent_memory):
+        _text = "Deleting memory with key " + str(key)
+        del mem.permanent_memory[key]
+        print(_text)
+        return _text
+    else:
+        print("Invalid key, cannot delete memory.")
+        return None
+
+
+def overwrite_memory(key, string):
+    # Check if the key is a valid integer
+    if is_valid_int(key):
+        key_int = int(key)
+        # Check if the integer key is within the range of the permanent_memory list
+        if 0 <= key_int < len(mem.permanent_memory):
+            _text = "Overwriting memory with key " + str(key) + " and string " + string
+            # Overwrite the memory slot with the given integer key and string
+            mem.permanent_memory[key_int] = string
+            print(_text)
+            return _text
+        else:
+            print(f"Invalid key '{key}', out of range.")
+            return None
+    # Check if the key is a valid string
+    elif isinstance(key, str):
+        _text = "Overwriting memory with key " + key + " and string " + string
+        # Overwrite the memory slot with the given string key and string
+        mem.permanent_memory[key] = string
+        print(_text)
+        return _text
+    else:
+        print(f"Invalid key '{key}', must be an integer or a string.")
+        return None
+
+
+def shutdown():
+    print("Shutting down...")
+    quit()
+
+
+@command("start_agent", "Start GPT Agent", '"name": "<name>", "task": "<short_task_desc>", "prompt": "<prompt>"')
+def start_agent(name, task, prompt, model=cfg.fast_llm_model):
+    global cfg
+
+    # Remove underscores from name
+    voice_name = name.replace("_", " ")
+
+    first_message = f"""You are {name}.  Respond with: "Acknowledged"."""
+    agent_intro = f"{voice_name} here, Reporting for duty!"
+
+    # Create agent
+    if cfg.speak_mode:
+        speak.say_text(agent_intro, 1)
+    key, ack = agents.create_agent(task, first_message, model)
+
+    if cfg.speak_mode:
+        speak.say_text(f"Hello {voice_name}. Your task is as follows. {task}.")
+
+    # Assign task (prompt), get response
+    agent_response = message_agent(key, prompt)
+
+    return f"Agent {name} created with key {key}. First response: {agent_response}"
+
+
+def message_agent(key, message):
+    global cfg
+
+    # Check if the key is a valid integer
+    if is_valid_int(key):
+        agent_response = agents.message_agent(int(key), message)
+    # Check if the key is a valid string
+    elif isinstance(key, str):
+        agent_response = agents.message_agent(key, message)
+    else:
+        return "Invalid key, must be an integer or a string."
+
+    # Speak response
+    if cfg.speak_mode:
+        speak.say_text(agent_response, 1)
+    return agent_response
+
+
+def list_agents():
+    return agents.list_agents()
+
+
+def delete_agent(key):
+    result = agents.delete_agent(key)
+    if not result:
+        return f"Agent {key} does not exist."
+    return f"Agent {key} deleted."

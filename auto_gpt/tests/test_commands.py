@@ -75,7 +75,7 @@ class TestCommandRegistry:
         cmd = Command(name="example", description="Example command", method=self.example_function)
 
         registry.register(cmd)
-        retrieved_cmd = registry.get_command(cmd.name)
+        retrieved_cmd = registry.parse_command(cmd.name)
 
         assert retrieved_cmd == cmd
 
@@ -84,7 +84,7 @@ class TestCommandRegistry:
         registry = CommandRegistry()
 
         with pytest.raises(KeyError):
-            registry.get_command("nonexistent_command")
+            registry.parse_command("nonexistent_command")
 
     def test_call_command(self):
         """Test that a command can be called through the registry."""

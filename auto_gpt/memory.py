@@ -1,4 +1,4 @@
-from config import Config, Singleton
+from auto_gpt.config import Config, Singleton
 import pinecone
 import openai
 

@@ -1,5 +1,5 @@
 import openai
-from config import Config
+from auto_gpt.config import Config
 cfg = Config()
 
 openai.api_key = cfg.openai_api_key

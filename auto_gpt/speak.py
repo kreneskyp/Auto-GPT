@@ -1,7 +1,7 @@
 import os
 from playsound import playsound
 import requests
-from config import Config
+from auto_gpt.config import Config
 cfg = Config()
 import gtts
 

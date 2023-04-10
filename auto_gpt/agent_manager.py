@@ -1,5 +1,5 @@
-from auto_gpt.commands import command
-from llm_utils import create_chat_completion
+from ix.commands import command
+from auto_gpt.llm_utils import create_chat_completion
 
 next_key = 0
 agents = {}  # key, (task, full_message_history, model)

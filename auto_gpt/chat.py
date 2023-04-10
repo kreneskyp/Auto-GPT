@@ -1,12 +1,11 @@
 import time
 import openai
-from dotenv import load_dotenv
-from config import Config
-import token_counter
+from auto_gpt.config import Config
+from auto_gpt import token_counter
 
 cfg = Config()
 
-from llm_utils import create_chat_completion
+from auto_gpt.llm_utils import create_chat_completion
 
 
 def create_chat_message(role, content):
@@ -129,9 +128,6 @@ def chat_with_ai(
             )
 
             # Update full message history
-            full_message_history.append(
-                create_chat_message(
-                    "user", user_input))
             full_message_history.append(
                 create_chat_message(
                     "assistant", assistant_reply))

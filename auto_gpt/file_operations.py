@@ -1,6 +1,6 @@
 import os
 import os.path
-from auto_gpt.commands import command
+from ix.commands import command
 
 
 # Set a dedicated folder for file I/O

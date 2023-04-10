@@ -1,6 +1,6 @@
 import docker
 import os
-from auto_gpt.commands import command
+from ix.commands import command
 
 
 @command("execute_python_file", "Execute Python File", '"file": "<file>"')

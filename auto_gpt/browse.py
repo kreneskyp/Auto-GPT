@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
-from config import Config
-from llm_utils import create_chat_completion
+from auto_gpt.config import Config
+from auto_gpt.llm_utils import create_chat_completion
 
 cfg = Config()
 

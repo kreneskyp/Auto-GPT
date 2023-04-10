@@ -1,8 +1,8 @@
 from typing import List
 import json
-from config import Config
-from call_ai_function import call_ai_function
-from auto_gpt.commands import command
+from auto_gpt.config import Config
+from auto_gpt.call_ai_function import call_ai_function
+from ix.commands import command
 
 cfg = Config()
 
