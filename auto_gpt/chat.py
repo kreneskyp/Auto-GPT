@@ -24,9 +24,9 @@ def create_chat_message(role, content):
 
 def generate_context(prompt, relevant_memory, full_message_history, model):
     current_context = [
-        create_chat_message(
-            "system", prompt), create_chat_message(
-            "system", f"Permanent memory: {relevant_memory}")]
+        create_chat_message("system", prompt),
+        create_chat_message("system", f"Permanent memory: {relevant_memory}")
+    ]
 
     # Add messages from the full message history until we reach the token limit
     next_message_to_add_index = len(full_message_history) - 1
